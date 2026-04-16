@@ -1,14 +1,40 @@
+# Environments
 venv/
+qna_agent1/
 .env
+
+# Data & Vector Store (Generated)
 data/
 vector_store/
 results/
+
+# Python
 __pycache__/
 *.pyc
-.DS_Store
-qna_agent1/
-scratch/
+*.pyo
+*.pyd
+
+# Logs
+*.log
 eval_log.txt
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Legacy / Debug (Cleanup)
+scratch/
 debug_*.py
+test_router.py
+BUILD_GUIDE (2).md
+llm_utils.py
+models.py
 llm_utils.py.bak
 models.py.bak
+*.bak

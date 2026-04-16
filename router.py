@@ -69,11 +69,11 @@ def route_query(query: str, vector_store: FAISS) -> RoutingResult:
             reason=f"Noise Filter: Scores too uniform ({score_spread:.4f})."
         )
 
-    # Step 4: Independent Agentic Sanitizer (Fixed local initialization to prevent hang)
+    # Step 4: Independent Agentic Sanitizer (No circular imports)
     if max_score < 0.65:
-        # Create a local client to avoid circular imports during sanitization
         api_key = os.getenv("GROQ_API_KEY")
         if api_key:
+            # Create a local client to avoid importing generator.py
             client = OpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
             sanitizer_prompt = (
                 f"Is the following question specifically related to AI regulation in the EU, US, China, or UK?\n"

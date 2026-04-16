@@ -1,4 +1,3 @@
-# generator.py
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -9,7 +8,7 @@ from config import LLM_MODEL, LLM_TEMPERATURE, MAX_TOKENS, LLM_PROVIDER, GROQ_BA
 load_dotenv()
 
 def initialize_client():
-    """Centralized LLM client initialization."""
+    """Points to the correct provider and handles missing keys gracefully."""
     provider = LLM_PROVIDER
     if provider == "groq":
         key = os.getenv("GROQ_API_KEY")
@@ -21,11 +20,11 @@ def initialize_client():
         placeholder = "your_openai_api_key_here"
 
     # Use a dummy key if missing to prevent initialization crash
+    # The actual error will be caught during the first API call
     safe_key = key if (key and key != placeholder) else "missing_key"
     
     return OpenAI(api_key=safe_key, base_url=base_url)
 
-# Initialize the global client for generation
 client = initialize_client()
 
 
@@ -75,7 +74,7 @@ def generate_synthesis_answer(query: str, routing_result: RoutingResult) -> str:
     context = _format_chunks(routing_result.top_chunks, max_chunks=7)
     sources = ", ".join(routing_result.sources_found)
 
-    system_prompt = """You are an analytical assistant specialised in AI regulation.
+    system_prompt = """You are an analytical assistant specialising in AI regulation.
 You will receive multiple chunks from different source documents.
 Your job is to:
 1. Synthesize information across all chunks to answer the question comprehensively.
@@ -109,7 +108,10 @@ Synthesized Answer (note any contradictions between sources):"""
 
 
 def generate_out_of_scope_response(query: str) -> str:
-    """Hardcoded decline response for out-of-scope queries."""
+    """
+    Hardcoded decline response. NO LLM call is made.
+    This guarantees zero hallucination for out-of-scope queries.
+    """
     return (
         "I'm sorry, but the provided documents do not contain enough information "
         "to answer this question. This query appears to be outside the scope of "
@@ -118,7 +120,10 @@ def generate_out_of_scope_response(query: str) -> str:
 
 
 def generate_answer(query: str, routing_result: RoutingResult) -> str:
-    """Master dispatcher: routes to the correct generation strategy."""
+    """
+    Master dispatcher: routes to the correct generation strategy
+    based on the RoutingResult.
+    """
     if routing_result.route == "factual":
         return generate_factual_answer(query, routing_result)
     elif routing_result.route == "synthesis":
