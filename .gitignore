@@ -1,0 +1,12 @@
+venv/
+.env
+data/
+vector_store/
+results/
+__pycache__/
+*.pyc
+.DS_Store
+qna_agent1/
+scratch/
+eval_log.txt
+debug_*.py

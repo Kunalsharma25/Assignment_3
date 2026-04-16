@@ -1,0 +1,24 @@
+# PDF parsing
+PyMuPDF==1.24.3
+
+# Embeddings and vector store
+langchain-community==0.2.5
+langchain-huggingface==0.0.3
+faiss-cpu==1.8.0
+fastembed>=0.8.0
+
+# LLM API
+openai==1.35.3
+
+# NLP for routing
+spacy==3.7.5
+
+# Evaluation metrics
+rouge-score==0.1.2
+scikit-learn==1.5.0
+numpy==1.26.4
+
+# Utilities
+python-dotenv==1.0.1
+pandas==2.2.2
+tqdm==4.66.4
