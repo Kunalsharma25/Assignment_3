@@ -1,11 +1,33 @@
 # generator.py
 import os
-from models import RoutingResult
-from llm_utils import initialize_client
-from config import LLM_MODEL, LLM_TEMPERATURE, MAX_TOKENS
+from dotenv import load_dotenv
+from openai import OpenAI
+from router import RoutingResult
+from config import LLM_MODEL, LLM_TEMPERATURE, MAX_TOKENS, LLM_PROVIDER, GROQ_BASE_URL
 
-# Initialize the global client
+# Load environment variables early
+load_dotenv()
+
+def initialize_client():
+    """Centralized LLM client initialization."""
+    provider = LLM_PROVIDER
+    if provider == "groq":
+        key = os.getenv("GROQ_API_KEY")
+        base_url = GROQ_BASE_URL
+        placeholder = "your_groq_api_key_here"
+    else:
+        key = os.getenv("OPENAI_API_KEY")
+        base_url = None
+        placeholder = "your_openai_api_key_here"
+
+    # Use a dummy key if missing to prevent initialization crash
+    safe_key = key if (key and key != placeholder) else "missing_key"
+    
+    return OpenAI(api_key=safe_key, base_url=base_url)
+
+# Initialize the global client for generation
 client = initialize_client()
+
 
 def _format_chunks(chunks: list, max_chunks: int) -> str:
     """Format retrieved chunks into a numbered context block for the LLM prompt."""
@@ -14,6 +36,7 @@ def _format_chunks(chunks: list, max_chunks: int) -> str:
         source = chunk.metadata.get("source", "Unknown")
         context_parts.append(f"[Chunk {i+1} | Source: {source}]\n{chunk.page_content}")
     return "\n\n---\n\n".join(context_parts)
+
 
 def generate_factual_answer(query: str, routing_result: RoutingResult) -> str:
     """Generate a grounded factual answer from top-3 chunks."""
@@ -45,6 +68,7 @@ Answer (based only on the context above):"""
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error generating factual answer: {str(e)}"
+
 
 def generate_synthesis_answer(query: str, routing_result: RoutingResult) -> str:
     """Generate a synthesis answer from top-7 chunks across multiple documents."""
@@ -83,6 +107,7 @@ Synthesized Answer (note any contradictions between sources):"""
     except Exception as e:
         return f"Error generating synthesis answer: {str(e)}"
 
+
 def generate_out_of_scope_response(query: str) -> str:
     """Hardcoded decline response for out-of-scope queries."""
     return (
@@ -90,6 +115,7 @@ def generate_out_of_scope_response(query: str) -> str:
         "to answer this question. This query appears to be outside the scope of "
         "the AI regulation knowledge base. Please consult additional sources."
     )
+
 
 def generate_answer(query: str, routing_result: RoutingResult) -> str:
     """Master dispatcher: routes to the correct generation strategy."""

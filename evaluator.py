@@ -10,16 +10,17 @@ from generator import generate_answer
 from test_questions import TEST_QUESTIONS
 from config import RESULTS_DIR
 
-# Ensure environment variables are loaded
+# Load environment variables early
 load_dotenv()
 
-# Load vector store globally before other libraries can conflict
+# Load vector store globally once to avoid DLL conflicts
+print("Loading vector store...", flush=True)
 vector_store = load_vector_store()
 
 def compute_rouge_l(hypothesis: str, reference_keywords: list[str]) -> float:
-    """Compute ROUGE-L between generated answer and pseudo-reference from keywords."""
+    """Compute ROUGE-L between hypothesis and keywords."""
     if not reference_keywords:
-        return 1.0  # Out-of-scope success
+        return 1.0 
     reference = " ".join(reference_keywords)
     scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
     scores = scorer.score(reference, hypothesis)
@@ -45,7 +46,7 @@ def check_retrieval_hit(routing_result, expected_sources: list) -> int:
     return int(bool(retrieved_sources.intersection(set(expected_sources))))
 
 def run_evaluation() -> pd.DataFrame:
-    """Run full evaluation pipeline with real-time progress flushing."""
+    """Run full evaluation pipeline."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
     records = []
 
@@ -62,20 +63,20 @@ def run_evaluation() -> pd.DataFrame:
 
         print(f"[{qid}] {query[:70]}...", end=" ", flush=True)
 
-        # Execution
+        # Start timer
         start = time.time()
         routing_result = route_query(query, vector_store)
         answer = generate_answer(query, routing_result)
         elapsed = round(time.time() - start, 2)
 
-        # Metric calculation
+        # Score
         routing_correct = int(routing_result.route == expected_route)
         retrieval_hit = check_retrieval_hit(routing_result, expected_sources)
         rouge_l = compute_rouge_l(answer, expected_keywords)
         keyword_overlap = compute_keyword_overlap(answer, expected_keywords)
 
-        icon = "OK" if routing_correct else "X"
-        print(f"-> {routing_result.route} [{icon}] ({elapsed}s)", flush=True)
+        result_icon = "OK" if routing_correct else "X"
+        print(f"-> {routing_result.route} [{result_icon}] ({elapsed}s)", flush=True)
 
         records.append({
             "id": qid,
@@ -94,14 +95,12 @@ def run_evaluation() -> pd.DataFrame:
     csv_path = os.path.join(RESULTS_DIR, "evaluation_results.csv")
     df.to_csv(csv_path, index=False)
     
-    # Final Summary
     print("\n" + "="*80, flush=True)
-    print("SUMMARY STATISTICS", flush=True)
+    print("SUMMARY", flush=True)
     print("="*80, flush=True)
     print(f"Overall Routing Accuracy:  {df['routing_correct'].mean():.1%}", flush=True)
     print(f"Overall Retrieval Hit Rate: {df['retrieval_hit'].mean():.1%}", flush=True)
-    print(df[["id", "query_type", "routing_correct", "retrieval_hit"]].to_string(index=False), flush=True)
-
+    
     return df
 
 if __name__ == "__main__":

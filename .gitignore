@@ -10,3 +10,5 @@ qna_agent1/
 scratch/
 eval_log.txt
 debug_*.py
+llm_utils.py.bak
+models.py.bak
