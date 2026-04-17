@@ -1,7 +1,7 @@
 # Failure Analysis & System Reflection
 **Project:** Agentic RAG Pipeline for AI Regulation
 
-This document provides a deep-dive analysis of the critical failure points encountered during development, the architectural pivots made to resolve them, and the remaining trade-offs in the final system.
+This document provides a deep-dive analysis of the critical **agentic logic failures** encountered during development. Unlike standard software bugs, these failures represent the "reasoning gaps" where the AI agent's decision-making logic failed to align with factual reality or user intent.
 
 ---
 
@@ -11,54 +11,63 @@ This document provides a deep-dive analysis of the critical failure points encou
 **Root Cause:** 
 The embedding model (`all-MiniLM-L6-v2`) produced similarity scores for "junk" queries (~0.56) that were actually **higher** than those for specific technical facts (~0.45). This occurred because the junk query matched frequent boilerplate terms ("AI," "Regulation," "Policy") found in every document, creating a high-similarity background "noise" that a static threshold could not filter.
 
-**The Fix (Agentic Sanitization):**
-We moved away from a one-dimensional similarity threshold. We implemented a **multi-stage gate**:
-1.  **Score Dispersion:** If the retrieval scores are too "flat" (low spread), the system suspects background noise.
-2.  **Agentic Sanitization:** For marginal scores (0.40–0.65), we trigger a low-latency LLM call (`llama-3.1-8b-instant`) to verify the topic's relevance to our specific regions (EU, US, China, UK). This added a "reasoning layer" that math alone couldn't provide.
+**The Agentic Pivot (Sanitization):**
+We implemented a **multi-stage gate**:
+1.  **Score Dispersion:** If retrieval scores are too "flat," the system suspects background noise.
+2.  **Agentic Sanitization:** For marginal scores, a `llama-3.1-8b` agent verifies domain relevance (EU, US, China, UK). This added a "reasoning layer" that math alone couldn't provide.
 
 ---
 
-## 2. Technical Failure: Windows DLL & Environment Instability
-**Observed Problem:** Persistent `WinError 1114: A dynamic link library (DLL) initialization routine failed` crashes during the embedding phase.
+## 2. Logic Failure: The "Dominant Doc" (Factual-Synthesis Misrouting)
+**Observed Problem:** Queries explicitly asking for cross-document comparisons (e.g., *"What penalty figures are cited across the documents?"*) were incorrectly routed to the **Factual** strategy.
 
 **Root Cause:** 
-The standard `sentence-transformers` library carries heavy PyTorch dependencies that frequently conflict with Windows-specific C++ runtimes or GPU drivers. In a local environment, this made the ingestion pipeline extremely fragile.
+The router's "Confidence-Gap" logic had a flaw: if one specific document chunk had a very high similarity score (e.g., >0.65), the system assumed it had found a "perfect match" and defaulted to the Factual route. This "hijacked" the synthesis request, causing the system to ignore other relevant documents and providing a single-source answer that missed the requested comparison.
 
-**The Fix (FastEmbed Migration):**
-We swapped the underlying engine to **`FastEmbed`**. By using a lightweight ONNX-based execution provider, we eliminated the PyTorch dependency entirely. This resulted in a **4x increase in ingestion speed** and a 100% reduction in environment-related crashes.
+**The Agentic Pivot:**
+Priority was shifted to **Linguistic Signals**. We now prioritize synthesis keywords (e.g., "across," "compare," "both") over raw similarity scores. Even if one document is "loud," an explicit request for multi-source reasoning will now force the Synthesis route.
 
 ---
 
-## 3. Structural Failure: Circular Dependency Deadlocks
-**Observed Problem:** The system would "Silent Hang" (no output, no error) during the evaluation of multiple questions.
+## 3. Reasoning Failure: Synthesis Noise & "Information Dilution"
+**Observed Problem:** In complex synthesis queries, the system would sometimes provide "generic" or "vague" answers, even when the data was present.
 
 **Root Cause:** 
-A circular import loop was created between `router.py` (which called the generator for sanitization) and `generator.py` (which imported the router's data structures). On Windows, this often causes a thread lock during module loading, particularly when combined with `dotenv` and multiple LLM client initializations.
+By increasing the context window to **Top-7 chunks** for the Synthesis route, we inadvertently introduced "contextual noise." Legal documents contain heavy boilerplate. When 7 chunks were injected into the prompt, the specific answer was often "diluted" by surrounding legal definitions, leading to a "Lost in the Middle" syndrome where the model focused on the most prominent (but irrelevant) text.
 
-**The Fix (Decoupling):**
-We refactored the architecture to make the **Sanitizer independent**. By initializing a lightweight, local LLM client directly inside the router's function and isolating the data models, we broke the loop. This restored the "Zero-Hang" performance required for large-scale evaluation.
+**The Agentic Pivot:**
+We implemented **Source Anchoring** in the synthesis prompt. The system is now explicitly instructed to map claims to specific chunks immediately. This forces the model to treat the 7 chunks as discrete evidence points rather than a single block of text.
 
 ---
 
-## 4. Hardware/API Failure: Token Quota & Rate Limiting (429)
-**Observed Problem:** During the final 15-question evaluation, the system would fail halfway with `RateLimitError: TPD Limit Reached`.
+## 4. Sensitivity Failure: Sanitization Over-Rejection
+**Observed Problem:** The system would refuse to answer valid queries like *"List the AI guidelines for developers"* even though the documents contained them.
 
 **Root Cause:** 
-The high-accuracy `llama-3.3-70b` model has a strict low-tier quota. Running 15 multi-turn RAG cycles (plus routing checks) exhausted the daily limit in minutes.
+The **Agentic Sanitizer** was originally too strict. The prompt instructed the LLM to only answer YES if the question mentioned "Regulations" or "Acts." Since guidelines and treaties aren't technically "Acts," the sanitizer triggered a hard refusal. This created a "Brittle Agent" that lacked the semantic flexibility to understand that "Guidelines" are part of the "Regulation" domain.
 
-**The Fix (Hybrid Model Routing):**
-We implemented a **Hybrid Model Strategy**:
-- **8B Model:** Handles the fast "YES/NO" sanitization and standard factual queries.
-- **70B Model:** (Configurable) Reserved for complex Synthesis queries where deep reasoning is required.
-This allowed the evaluation suite to run to completion while maintaining high reasoning quality where it matters most.
+**The Agentic Pivot:**
+The Sanitizer prompt was refactored to focus on **Area of Interest** (Domain) rather than **Document Type**. This allows the agent to be "Semantic" rather than "Literal" in its gatekeeping.
 
 ---
 
-## 5. Ongoing Limitation: Contextual Density vs. Contradiction
+## 5. Ongoing Limitation: Contextual Contradiction Anchoring
 **Reflection:** 
-The system's ability to "Flag Contradictions" (e.g., the 30M vs 35M penalty discrepancy) is entirely dependent on **Retrieval Density**. If the top-K retrieval only pulls the "35M" chunk, the LLM will never see the "30M" counter-point, making it impossible to flag the contradiction.
+The system still struggles to reconcile conflicting values when they are not physically close in the retrieved text. For example, if one document cites a fine of "30 Million" and another "35 Million," the system only catches this if *both* chunks make it into the Top-K. 
 
-**Future Work:** To fully resolve this, a **"Contrastive Retrieval"** step would be needed—where the agent explicitly searches for opposing facts *after* the initial retrieval—but this was out of scope for the current assignment's latency requirements.
+**Future Work:** 
+The next evolution would be **Iterative Refining**—where the agent generates a draft answer, identifies an ambiguity (like a missing fine amount), and performs a *targeted* second-pass search for that specific fact. This "multi-turn" retrieval was out of scope for the current architecture but is the logical next step for 100% accuracy.
+
+---
+
+## 6. Structural Failure: Chunk Boundary Loss (Semantic Truncation)
+**Observed Problem:** The system occasionally provided technically correct but "dangerously incomplete" answers regarding specific legal penalties.
+
+**Root Cause:** 
+Our ingestion pipeline uses a fixed chunk size of 400 tokens. In legal documents, complex clauses are often very long. If a penalty amount is mentioned in the first half of a clause and the *qualifying condition* for that penalty is in the second half, the splitter may cut the clause in two. If the vector search only retrieves the "amount" chunk, the Agent provides the figure without the critical legal context, leading to a loss of semantic integrity.
+
+**The Agentic Pivot:**
+While not fully implemented in this version, we attempted to mitigate this by increasing **Chunk Overlap (to 80 tokens)**. This ensures that the context at the "cut point" is preserved in both adjacent chunks, reducing the risk of a fact being stranded without its surrounding logic.
 
 ---
 *End of Report*
